@@ -1,14 +1,20 @@
 OUT_DIR := ./out
-all: $(OUT_DIR)/main
+TARGET := $(OUT_DIR)/main
 
-TINY_LA := ./vendor/tinyla
-CFLAGS := -lm -g -I$(TINY_LA)
+CPPFLAGS := -I./vendor/tinyla -I./vendor/raylib/build/raylib/include
+LDFLAGS := -L./vendor/raylib/build/raylib
+LDLIBS := -lraylib -lm -lX11
+CFLAGS := -g
 
-$(OUT_DIR)/main: main.c | $(OUT_DIR)
-	$(CC) -o $@ $< $(CFLAGS)
+all: $(TARGET)
+
+$(TARGET): main.c | $(OUT_DIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< -o $@ $(LDFLAGS) $(LDLIBS)
 
 $(OUT_DIR):
-	@mkdir -p $(OUT_DIR)
+	mkdir -p $(OUT_DIR)
 
 clean:
-	@rm -rf $(OUT_DIR)
+	rm -rf $(OUT_DIR)
+
+.PHONY: all clean
