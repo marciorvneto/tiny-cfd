@@ -1,5 +1,5 @@
 OUT_DIR := ./out
-OUT_BROWSER_DIR := ./browser-viz
+OUT_BROWSER_DIR := ./docs
 TARGET := $(OUT_DIR)/main
 TARGET_BROWSER := $(OUT_BROWSER_DIR)/browser.js # Must be .js for Emscripten glue code!
 
