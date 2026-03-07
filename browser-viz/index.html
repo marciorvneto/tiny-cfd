@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live Euler Solver</title>
+    <style>
+      body {
+        background-color: #1e1e1e;
+        color: #eee;
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-top: 40px;
+      }
+      canvas {
+        background-color: #333;
+        border: 1px solid #555;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        margin-bottom: 20px;
+      }
+      .controls {
+        display: flex;
+        gap: 30px;
+        background: #2a2a2a;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #444;
+      }
+      .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Live Supersonic Nozzle Simulation</h2>
+
+    <canvas id="simCanvas" width="900" height="500"></canvas>
+
+    <div class="controls">
+      <div class="control-group">
+        <label for="pressureSlider"
+          >Inlet Pressure (Pa): <span id="pLabel">120000</span></label
+        >
+        <input
+          type="range"
+          id="pressureSlider"
+          min="100000"
+          max="300000"
+          value="120000"
+          step="5000"
+        />
+      </div>
+      <div class="control-group">
+        <label for="tempSlider"
+          >Inlet Temp (K): <span id="tLabel">350</span></label
+        >
+        <input
+          type="range"
+          id="tempSlider"
+          min="300"
+          max="3000"
+          value="350"
+          step="50"
+        />
+      </div>
+      <div class="control-group">
+        <label>&nbsp;</label>
+        <button id="resetBtn" style="padding: 5px 15px; cursor: pointer">
+          Reset Flow
+        </button>
+      </div>
+    </div>
+
+    <script src="browser.js"></script>
+
+    <script>
+      Module.onRuntimeInitialized = () => {
+        console.log("WASM Module Loaded.");
+
+        Module._init_wasm_simulation();
+
+        const numPoints = Module._get_num_points();
+        const numTris = Module._get_num_tris();
+
+        const pointsPtr = Module._get_points_ptr();
+        const trisPtr = Module._get_tris_ptr();
+        const machPtr = Module._get_mach_ptr();
+
+        const points = new Float32Array(
+          window.cfdBuffer,
+          pointsPtr,
+          numPoints * 2,
+        );
+        const tris = new Int32Array(window.cfdBuffer, trisPtr, numTris * 3);
+        const machs = new Float32Array(window.cfdBuffer, machPtr, numTris);
+
+        const canvas = document.getElementById("simCanvas");
+        const ctx = canvas.getContext("2d");
+
+        const scale = 200;
+        const offsetX = 50;
+        const offsetY = canvas.height / 2;
+
+        function getMachColor(mach) {
+          if (isNaN(mach) || !isFinite(mach)) {
+            return "rgb(0, 0, 255)"; // Safe blue fallback
+          }
+          const t = Math.max(0.0, Math.min(mach / 2.0, 1.0));
+          const r = Math.floor(255 * t);
+          const b = Math.floor(255 * (1.0 - t));
+          return `rgb(${r}, 0, ${b})`;
+        }
+
+        function renderFrame() {
+          Module._step_wasm_simulation(20);
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          // Draw each triangle
+          for (let i = 0; i < numTris; i++) {
+            const v0 = tris[i * 3 + 0];
+            const v1 = tris[i * 3 + 1];
+            const v2 = tris[i * 3 + 2];
+
+            const x0 = points[v0 * 2 + 0] * scale + offsetX;
+            const y0 = -points[v0 * 2 + 1] * scale + offsetY;
+
+            const x1 = points[v1 * 2 + 0] * scale + offsetX;
+            const y1 = -points[v1 * 2 + 1] * scale + offsetY;
+
+            const x2 = points[v2 * 2 + 0] * scale + offsetX;
+            const y2 = -points[v2 * 2 + 1] * scale + offsetY;
+
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.closePath();
+
+            const color = getMachColor(machs[i]);
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+
+          requestAnimationFrame(renderFrame);
+        }
+
+        document
+          .getElementById("pressureSlider")
+          .addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value);
+            document.getElementById("pLabel").innerText = val;
+            Module._set_inlet_pressure(val);
+          });
+
+        document.getElementById("tempSlider").addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          document.getElementById("tLabel").innerText = val;
+          Module._set_inlet_temperature(val);
+        });
+
+        document.getElementById("resetBtn").addEventListener("click", () => {
+          Module._reset_wasm_simulation();
+        });
+
+        renderFrame();
+      };
+    </script>
+  </body>
+</html>

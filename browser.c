@@ -3,10 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 #define TINY_LA_IMPLEMENTATION
-#include "raylib.h"
-#include "tinyla.h"
+#include <emscripten.h>
 #include <math.h>
 #include <stdio.h>
+
+typedef struct Color {
+  unsigned char r;
+  unsigned char g;
+  unsigned char b;
+  unsigned char a;
+} Color;
 
 // =====================================
 //
@@ -252,7 +258,6 @@ Circle circumcenter(Vertex2 a, Vertex2 b, Vertex2 c) {
 }
 
 void bowyer_watson_insert_point(Arena *a, TriangularMesh *mesh, int point_idx) {
-  printf("Inserting: %d\n", point_idx);
   Vertex2 p = mesh->points[point_idx];
 
   size_t scratch = arena_save(a);
@@ -687,11 +692,18 @@ void calculate_boundary_fluxes(FVSolverData *solver, TriangularMesh *mesh,
     Flux flux = {0};
 
     if (bc->type == BC_WALL) {
-      // Zero mass/energy crosses, only pressure pushes.
-      flux.mass = 0.0f;
-      flux.momentum_x = state_left.p * info.nx;
-      flux.momentum_y = state_left.p * info.ny;
-      flux.energy = 0.0f;
+      FlowState ghost = state_left;
+
+      // Calculate the normal velocity (V . n)
+      float vn = state_left.u * info.nx + state_left.v * info.ny;
+
+      // Reflect the velocity vector across the normal: V_ghost = V - 2*(V.n)*n
+      // This creates an equal and opposite collision at the wall!
+      ghost.u = state_left.u - 2.0f * vn * info.nx;
+      ghost.v = state_left.v - 2.0f * vn * info.ny;
+
+      // Run it through Rusanov to get the stabilized flux!
+      flux = rusanov_flux(&state_left, &ghost, info.nx, info.ny, gamma);
     } else if (bc->type == BC_INLET) {
       // Ghost cell
       FlowState ghost = stagnation_state(bc, gamma);
@@ -915,134 +927,24 @@ Color mach_to_color(float mach) {
   return (Color){r, 0, b, 255};
 }
 
-void simulate_and_display(Arena *a, FVSolverData *solver, TriangularMesh *mesh,
-                          HalfEdgeMesh *he, MeshBoundaryConditions *bcs,
-                          float gamma) {
-  InitWindow(800, 450, "De Laval Nozzle Transient Simulation");
+// =====================================
+//
+// WebAssembly API
+//
+// =====================================
 
-  float scale, offset_x, offset_y;
+static Arena a;
+static TriangularMesh mesh;
+static HalfEdgeMesh he;
+static MeshBoundaryConditions bcs;
+static FVSolverData solver;
 
-  float dt = 1e-6;
+static float *mach_numbers;
+static float current_gamma = 1.4f;
 
-  while (!WindowShouldClose()) {
-    compute_viewport(mesh->points, mesh->num_points, GetScreenWidth(),
-                     GetScreenHeight(), 20, 20, &scale, &offset_x, &offset_y);
-
-    // 20 simulation steps per rendered visual frame to speed things up
-    for (int step = 0; step < 10; step++) {
-      euler_step(a, solver, mesh, he, bcs, gamma, dt);
-    }
-
-    BeginDrawing();
-    ClearBackground(DARKGRAY);
-
-    for (size_t i = 0; i < mesh->num_tris; i++) {
-      Triangle *t = &mesh->tris[i];
-      Vertex2 p0 = mesh->points[t->v[0]];
-      Vertex2 p1 = mesh->points[t->v[1]];
-      Vertex2 p2 = mesh->points[t->v[2]];
-
-      // Calculate the Mach number for this triangle
-      FlowState s = solver->states[i];
-      float v_mag = sqrtf(s.u * s.u + s.v * s.v);
-      float c = sound_speed(s.rho, gamma, s.p);
-      float mach = v_mag / c;
-
-      Color color = mach_to_color(mach);
-
-      // Apply the negative sign to the Y coordinate to flip it right-side up
-      Vector2 v0 = {p0.x * scale + offset_x, -p0.y * scale + offset_y};
-      Vector2 v1 = {p1.x * scale + offset_x, -p1.y * scale + offset_y};
-      Vector2 v2 = {p2.x * scale + offset_x, -p2.y * scale + offset_y};
-
-      DrawTriangle(v0, v1, v2, color);
-    }
-
-    DrawFPS(10, 10);
-    EndDrawing();
-  }
-
-  CloseWindow();
-}
-
-void display_poly(TriangularMesh *mesh, HalfEdgeMesh *he,
-                  MeshBoundaryConditions *bcs) {
-  InitWindow(800, 450, "Gaph viz");
-
-  while (!WindowShouldClose()) {
-    BeginDrawing();
-    ClearBackground(DARKGRAY);
-
-    float scale;
-    float offset_x;
-    float offset_y;
-    compute_viewport(mesh->points, mesh->num_points, GetScreenWidth(),
-                     GetScreenHeight(), 20, 20, &scale, &offset_x, &offset_y);
-
-    for (size_t i = 0; i < mesh->num_tris; i++) {
-      Triangle *t = &mesh->tris[i];
-
-      Vertex2 a = mesh->points[t->v[0]];
-      Vertex2 b = mesh->points[t->v[1]];
-      Vertex2 c = mesh->points[t->v[2]];
-
-      DrawLine(a.x * scale + offset_x, a.y * scale + offset_y,
-               b.x * scale + offset_x, b.y * scale + offset_y, RED);
-
-      DrawLine(b.x * scale + offset_x, b.y * scale + offset_y,
-               c.x * scale + offset_x, c.y * scale + offset_y, RED);
-
-      DrawLine(c.x * scale + offset_x, c.y * scale + offset_y,
-               a.x * scale + offset_x, a.y * scale + offset_y, RED);
-    }
-
-    // Draw BCS
-
-    for (size_t i = 0; i < bcs->count; i++) {
-      BoundaryCondition *bc = &bcs->bcs[i];
-      HalfEdge *h = &he->half_edges[bc->half_edge];
-
-      Vertex2 origin = mesh->points[h->origin];
-      Vertex2 target = mesh->points[he->half_edges[h->next].origin];
-
-      Color c = GRAY;
-      switch (bc->type) {
-      case BC_INLET: {
-        c = GREEN;
-        break;
-      }
-      case BC_OUTLET: {
-        c = YELLOW;
-        break;
-      }
-      case BC_WALL: {
-        break;
-      }
-      default:
-        break;
-      }
-      DrawLineEx(
-          (Vector2){origin.x * scale + offset_x, origin.y * scale + offset_y},
-          (Vector2){target.x * scale + offset_x, target.y * scale + offset_y},
-          3.0f, c);
-    }
-
-    // Draw points
-
-    for (size_t i = 0; i < mesh->num_points + 3; i++) {
-      DrawCircle(mesh->points[i].x * scale + offset_x,
-                 mesh->points[i].y * scale + offset_y, 2, BLUE);
-    }
-
-    EndDrawing();
-  }
-
-  CloseWindow();
-}
-
-int main() {
-
-  Arena a = arena_create(10 * 1024 * 1024); // 1MB
+EMSCRIPTEN_KEEPALIVE
+void init_wasm_simulation() {
+  a = arena_create(10 * 1024 * 1024); // 10 MB
 
   Polygon poly = create_polygon(&a, 1024);
 
@@ -1062,12 +964,12 @@ int main() {
     poly.vertices[poly.vertex_count++] = v_down;
   }
 
-  PointCloud cloud = sample_points_in_nozzle(&a, L, 50, 50);
+  PointCloud cloud = sample_points_in_nozzle(&a, L, 30, 30);
   for (size_t i = 0; i < poly.vertex_count; i++) {
     cloud.points[cloud.point_count++] = poly.vertices[i];
   }
 
-  TriangularMesh mesh = create_triangular_mesh(&a, 4 * cloud.point_count);
+  mesh = create_triangular_mesh(&a, 4 * cloud.point_count);
   mesh.points = cloud.points;
   mesh.num_points = cloud.point_count;
   bowyer_watson_triangulation(&a, &mesh);
@@ -1089,24 +991,70 @@ int main() {
   }
   mesh.num_tris = write;
 
-  HalfEdgeMesh he = create_half_edge_mesh(&a, mesh.num_points, mesh.num_tris);
+  he = create_half_edge_mesh(&a, mesh.num_points, mesh.num_tris);
   build_half_edge_mesh(&mesh, &he);
 
-  // Apply boundary conditions
-  MeshBoundaryConditions bcs =
-      create_mesh_boundary_conditions(&a, he.num_half_edges / 2);
+  bcs = create_mesh_boundary_conditions(&a, he.num_half_edges / 2);
   apply_boundary_conditions_to_nozzle(L, &he, mesh.points, &bcs);
 
-  printf("Arena state: %.3f%%\n full", 100.0f * a.offset / a.capacity);
-
-  FVSolverData solver = {0};
   solver.states = arena_alloc(&a, mesh.num_tris * sizeof(FlowState));
   solver.areas = arena_alloc(&a, mesh.num_tris * sizeof(float));
   init_solver(&solver, &mesh);
 
-  simulate_and_display(&a, &solver, &mesh, &he, &bcs, 1.4f);
+  mach_numbers = arena_alloc(&a, mesh.num_tris * sizeof(float));
 
-  arena_destroy(&a);
-
-  return 0;
+  EM_ASM({ window.cfdBuffer = HEAP8.buffer; });
 }
+
+EMSCRIPTEN_KEEPALIVE
+void step_wasm_simulation(int steps) {
+  for (int i = 0; i < steps; i++) {
+    float dt = calculate_dt(&solver, current_gamma);
+    euler_step(&a, &solver, &mesh, &he, &bcs, current_gamma, dt);
+  }
+
+  for (size_t i = 0; i < mesh.num_tris; i++) {
+    FlowState s = solver.states[i];
+    float v_mag = sqrtf(s.u * s.u + s.v * s.v);
+    float c = sound_speed(s.rho, current_gamma, s.p);
+    mach_numbers[i] = v_mag / c;
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void set_inlet_pressure(float pressure_pa) {
+  for (size_t i = 0; i < bcs.count; i++) {
+    if (bcs.bcs[i].type == BC_INLET) {
+      bcs.bcs[i].as.inlet_bc.p_total = pressure_pa;
+    }
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void set_inlet_temperature(float temp_k) {
+  for (size_t i = 0; i < bcs.count; i++) {
+    if (bcs.bcs[i].type == BC_INLET) {
+      bcs.bcs[i].as.inlet_bc.T_total = temp_k;
+    }
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void reset_wasm_simulation() {
+  float R_air = 8.314f / 0.029f;
+  float p_ambient = 100000.0f; // 1 atm
+  float T_ambient = 300.0f;    // Room temp
+  float rho_ambient = p_ambient / (R_air * T_ambient);
+
+  FlowState s0 = {.rho = rho_ambient, .u = 0.0f, .v = 0.0f, .p = p_ambient};
+
+  for (size_t i = 0; i < solver.num_cells; i++) {
+    solver.states[i] = s0;
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE int get_num_tris() { return mesh.num_tris; }
+EMSCRIPTEN_KEEPALIVE int get_num_points() { return mesh.num_points; }
+EMSCRIPTEN_KEEPALIVE Vertex2 *get_points_ptr() { return mesh.points; }
+EMSCRIPTEN_KEEPALIVE Triangle *get_tris_ptr() { return mesh.tris; }
+EMSCRIPTEN_KEEPALIVE float *get_mach_ptr() { return mach_numbers; }
