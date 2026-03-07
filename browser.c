@@ -940,6 +940,7 @@ static MeshBoundaryConditions bcs;
 static FVSolverData solver;
 
 static float *mach_numbers;
+static float *pressures;
 static float current_gamma = 1.4f;
 
 EMSCRIPTEN_KEEPALIVE
@@ -1002,6 +1003,7 @@ void init_wasm_simulation() {
   init_solver(&solver, &mesh);
 
   mach_numbers = arena_alloc(&a, mesh.num_tris * sizeof(float));
+  pressures = arena_alloc(&a, mesh.num_tris * sizeof(float));
 
   EM_ASM({ window.cfdBuffer = HEAP8.buffer; });
 }
@@ -1018,6 +1020,7 @@ void step_wasm_simulation(int steps) {
     float v_mag = sqrtf(s.u * s.u + s.v * s.v);
     float c = sound_speed(s.rho, current_gamma, s.p);
     mach_numbers[i] = v_mag / c;
+    pressures[i] = s.p;
   }
 }
 
@@ -1058,3 +1061,4 @@ EMSCRIPTEN_KEEPALIVE int get_num_points() { return mesh.num_points; }
 EMSCRIPTEN_KEEPALIVE Vertex2 *get_points_ptr() { return mesh.points; }
 EMSCRIPTEN_KEEPALIVE Triangle *get_tris_ptr() { return mesh.tris; }
 EMSCRIPTEN_KEEPALIVE float *get_mach_ptr() { return mach_numbers; }
+EMSCRIPTEN_KEEPALIVE float *get_pressure_ptr() { return pressures; }

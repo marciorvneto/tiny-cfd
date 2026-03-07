@@ -36,7 +36,12 @@
       .color-bar {
         width: 20px;
         height: 100%;
-        background: linear-gradient(to top, rgb(0, 0, 255), rgb(255, 0, 0));
+        background: linear-gradient(
+          to top,
+          rgb(0, 0, 255),
+          rgb(255, 255, 255),
+          rgb(255, 0, 0)
+        );
         border: 1px solid #555;
         border-radius: 4px;
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
@@ -94,6 +99,22 @@
 
     <div class="sim-container">
       <canvas id="simCanvas" width="900" height="500"></canvas>
+      <div
+        id="tooltip"
+        style="
+          position: absolute;
+          display: none;
+          background: rgba(0, 0, 0, 0.85);
+          color: #fff;
+          padding: 6px 10px;
+          border-radius: 4px;
+          pointer-events: none;
+          font-family: monospace;
+          font-size: 13px;
+          z-index: 10;
+          border: 1px solid #555;
+        "
+      ></div>
 
       <div class="scale-wrapper">
         <div class="color-bar"></div>
@@ -211,10 +232,21 @@
           if (isNaN(mach) || !isFinite(mach)) {
             return "rgb(0, 0, 255)"; // Safe blue fallback
           }
+
           const t = Math.max(0.0, Math.min(mach / 2.0, 1.0));
-          const r = Math.floor(255 * t);
-          const b = Math.floor(255 * (1.0 - t));
-          return `rgb(${r}, 0, ${b})`;
+          let r, g, b;
+
+          if (t < 0.5) {
+            r = Math.floor(255 * (t * 2.0));
+            g = Math.floor(255 * (t * 2.0));
+            b = 255;
+          } else {
+            r = 255;
+            g = Math.floor(255 * ((1.0 - t) * 2.0));
+            b = Math.floor(255 * ((1.0 - t) * 2.0));
+          }
+
+          return `rgb(${r}, ${g}, ${b})`;
         }
 
         function renderFrame() {
@@ -254,6 +286,77 @@
 
           requestAnimationFrame(renderFrame);
         }
+
+        // Daniel's idea: add a tooltip for pressures
+        // =======================
+
+        const pressurePtr = Module._get_pressure_ptr();
+        const pressures = new Float32Array(
+          window.cfdBuffer,
+          pressurePtr,
+          numTris,
+        );
+        const tooltip = document.getElementById("tooltip");
+
+        function pointInTriangle(px, py, x0, y0, x1, y1, x2, y2) {
+          const dX = px - x2;
+          const dY = py - y2;
+          const dX21 = x2 - x1;
+          const dY12 = y1 - y2;
+          const D = dY12 * (x0 - x2) + dX21 * (y0 - y2);
+          const s = dY12 * dX + dX21 * dY;
+          const t = (y2 - y0) * dX + (x0 - x2) * dY;
+          if (D < 0) return s <= 0 && t <= 0 && s + t >= D;
+          return s >= 0 && t >= 0 && s + t <= D;
+        }
+
+        canvas.addEventListener("mousemove", (e) => {
+          const rect = canvas.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+
+          const mx = (mouseX - offsetX) / scale;
+          const my = -(mouseY - offsetY) / scale;
+
+          let found = false;
+
+          for (let i = 0; i < numTris; i++) {
+            const v0 = tris[i * 3 + 0];
+            const v1 = tris[i * 3 + 1];
+            const v2 = tris[i * 3 + 2];
+
+            const x0 = points[v0 * 2 + 0],
+              y0 = points[v0 * 2 + 1];
+            const x1 = points[v1 * 2 + 0],
+              y1 = points[v1 * 2 + 1];
+            const x2 = points[v2 * 2 + 0],
+              y2 = points[v2 * 2 + 1];
+
+            if (pointInTriangle(mx, my, x0, y0, x1, y1, x2, y2)) {
+              const p_kPa = (pressures[i] / 1000.0).toFixed(2);
+              const m_val = machs[i].toFixed(2);
+
+              tooltip.innerHTML = `P: ${p_kPa} kPa<br>Ma: ${m_val}`;
+              tooltip.style.display = "block";
+              tooltip.style.left = e.pageX + 15 + "px";
+              tooltip.style.top = e.pageY + 15 + "px";
+
+              found = true;
+              break;
+            }
+          }
+
+          if (!found) {
+            tooltip.style.display = "none";
+          }
+        });
+
+        // Hide tooltip when mouse leaves the canvas
+        canvas.addEventListener("mouseleave", () => {
+          tooltip.style.display = "none";
+        });
+
+        // =======================
 
         document
           .getElementById("pressureSlider")
