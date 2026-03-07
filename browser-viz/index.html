@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Live Euler Solver</title>
+    <title>Live Supersonic Nozzle Simulation</title>
     <style>
       body {
         background-color: #1e1e1e;
@@ -13,12 +13,43 @@
         flex-direction: column;
         align-items: center;
         margin-top: 40px;
+        line-height: 1.6;
+      }
+      .sim-container {
+        display: flex;
+        gap: 15px;
+        align-items: flex-start;
+        margin-bottom: 20px;
       }
       canvas {
         background-color: #333;
         border: 1px solid #555;
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
-        margin-bottom: 20px;
+      }
+      .scale-wrapper {
+        display: flex;
+        height: 500px; /* Matches canvas height */
+        padding-top: 10px;
+        padding-bottom: 10px;
+        box-sizing: border-box;
+      }
+      .color-bar {
+        width: 20px;
+        height: 100%;
+        background: linear-gradient(to top, rgb(0, 0, 255), rgb(255, 0, 0));
+        border: 1px solid #555;
+        border-radius: 4px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+      }
+      .scale-labels {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: 100%;
+        margin-left: 10px;
+        font-size: 14px;
+        color: #ccc;
+        font-family: monospace;
       }
       .controls {
         display: flex;
@@ -27,18 +58,54 @@
         padding: 20px;
         border-radius: 8px;
         border: 1px solid #444;
+        margin-bottom: 30px;
       }
       .control-group {
         display: flex;
         flex-direction: column;
         gap: 5px;
       }
+      .description {
+        max-width: 800px;
+        background: #2a2a2a;
+        padding: 25px;
+        border-radius: 8px;
+        border: 1px solid #444;
+        margin-bottom: 50px;
+      }
+      .description h3 {
+        margin-top: 0;
+        color: #fff;
+      }
+      .description p {
+        color: #ccc;
+      }
+      a {
+        color: #4da6ff;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
     <h2>Live Supersonic Nozzle Simulation</h2>
 
-    <canvas id="simCanvas" width="900" height="500"></canvas>
+    <div class="sim-container">
+      <canvas id="simCanvas" width="900" height="500"></canvas>
+
+      <div class="scale-wrapper">
+        <div class="color-bar"></div>
+        <div class="scale-labels">
+          <span>2.0+ Ma</span>
+          <span>1.5 Ma</span>
+          <span>1.0 Ma</span>
+          <span>0.5 Ma</span>
+          <span>0.0 Ma</span>
+        </div>
+      </div>
+    </div>
 
     <div class="controls">
       <div class="control-group">
@@ -73,6 +140,41 @@
           Reset Flow
         </button>
       </div>
+    </div>
+
+    <div class="description">
+      <h3>The Architecture</h3>
+      <p>
+        This is a live transient Converging-Diverging (CD) nozzle simulation,
+        driven by a custom compressible Euler solver written entirely from
+        scratch in C and compiled to WebAssembly. The engine features a custom
+        Delaunay triangulator, a half-edge mesh data structure, and an arena
+        memory allocator to ensure completely zero-copy memory access between
+        the C physics engine and the JavaScript rendering canvas.
+      </p>
+
+      <h3>Why build this?</h3>
+      <p>
+        As a chemical engineer, my background is heavily rooted in process
+        simulation, mathematical optimization, and writing steady-state
+        simulators in C++. Historically, running rigorous finite volume methods
+        required clunky desktop software and massive computational overhead.
+      </p>
+
+      <p>
+        The goal of this project is to prove that high-performance engineering
+        math can run blazingly fast directly in the browser. By bridging highly
+        optimized C++ math engines with modern TypeScript frontends, we can
+        fundamentally change how engineers interact with process data. This
+        architecture acts as a foundational proof-of-concept for the interactive
+        calculations powering the diagramming tools at
+        <a href="https://voimatoolbox.com/calculations-list">Voima</a>.
+      </p>
+
+      <p>
+        Feel free to check out the source code, or reach out to me directly at
+        <a href="mailto:marcio@voimatoolbox.com">marcio@voimatoolbox.com</a>.
+      </p>
     </div>
 
     <script src="browser.js"></script>
