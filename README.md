@@ -2,6 +2,8 @@
 
 **[Live Browser Demo](https://marciorvneto.github.io/tiny-cfd/)**
 
+![Live Simulation Demo](./demo.gif)
+
 A 2D compressible Euler solver written entirely from scratch in C. This engine models transient supersonic fluid flow through a Converging-Diverging (CD) nozzle using the Finite Volume Method (FVM). It is designed to run natively on desktop or compile to WebAssembly for zero-friction browser execution.
 
 ## Engine Architecture
